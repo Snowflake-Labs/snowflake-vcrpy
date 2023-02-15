@@ -7,7 +7,7 @@ on the connector for HTTP interactions can also leverage the library.
 
 snowflake-vcrpy provides the following features:
 
-1. pytest fixtures to enable record and replay http based tests
+1. pytest fixtures to enable record and replay HTTP-based tests
 2. pytest options to select the tests run in record-and-replay mode
 
 
