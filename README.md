@@ -1,54 +1,63 @@
 # Introduction
 
-snowflake-vcrpy is designed to enhance local development experiences for applications
-built on top of snowflake-connector-python. Libraries like snowpark-python or snowflake-sqlalchemy which depends
-on the connector for http communication can also take advantage of the tool.
+snowflake-vcrpy is a library that allows you to record and replay HTTP interactions initiated by
+snowflake-connector-python for testing purposes. It is a pytest plugin built upon [VCR.py][vcrpy].
+Libraries like snowpark-python and snowflake-sqlalchemy depending
+on the connector for HTTP interactions can also leverage the library.
 
 snowflake-vcrpy provides the following features:
 
-1. Record and replay http based tests for faster local development
+1. pytest fixtures to enable record and replay HTTP-based tests
+2. pytest options to select the tests run in record-and-replay mode
 
 
-# Installation from source code
+# Installation
+
+snowflake-vcrpy can be installed from source code:
 
 ```bash
-$git clone git@github.com:sfc-gh-aling/snowflake-vcrpy.git
-$cd snowflake-vcrpy
-$pip install .
+$ git clone git@github.com:Snowflake-Labs/snowflake-vcrpy.git
+$ cd snowflake-vcrpy
+$ pip install .
 ```
 
 # Quick Start
 
-## Annotate a test to run with record and replay
+## Annotate a test with pytest marker to run in record-and-replay mode
 
 ```python
-# Annotate the test to run in record and replay mode
+# Annotate the test to run in record-and-replay mode
+import snowflake.connector
 @pytest.mark.snowflake_vcr
 def test_method():
-    pass
+    CONNECTION_PARAMETERS = {} # snowflake credentials
+    with snowflake.connector.connect(**CONNECTION_PARAMETERS) as conn, conn.cursor() as cursor:
+        assert cursor.execute('select 1').fetchall() == [(1,)]
 ```
 
 
 ## Run with pytest
 
-snowflake-vcrpy is a pytest plugin and by default it will identify tests annotated with `@pytest.mark.snowflake_vcr`
-and run those tests in record and replay mode.
+As a pytest plugin, snowflake-vcrpy by default will identify tests annotated with `@pytest.mark.snowflake_vcr`
+and run those tests in record-and-replay mode.
 
 ```bash
-$pytest test_method
+$pytest <test_file.py>
 ```
 
-With the first time running the test, a recording file containing http request/response with
-the name being `<test_class_name>,<test_method_name>.yaml` will be
-generated under the directory `<your_test_folder>/cassettes`.
+## Rationale
 
-Once the recording is generated, the following running of the test will run against the local recordings.
+snowflake-vcrpy incorporated [VCR.py][vcrpy] to achieve recording and replaying.
 
-If any change is made upon the test itself on purpose which changes the body of the request/response, you could delete
-the specific recording file under `<your_test_folder>/cassettes` so that the next running will regenerate the recording.
+The first time the test is run, a recording file consisting of HTTP requests and responses, will be generated under the directory `<your_test_folder>/cassettes` with the naming convention of `<test_class_name>.<test_method_name>.yaml`.
 
+VCR.py will retrieve the serialized requests and responses stored in the cassette file, and if it recognizes any HTTP requests from the original test run, it will intercept them and return the corresponding recorded responses.
 
-# pytest options to run tests in record and replay
+To accommodate any changes made to the API of the server being tested or responses, simply remove the existing cassette files and rerun your tests. VCR.py will identify the missing cassette files and automatically record all HTTP interactions.
+
+For advanced topics such as how request matching works or what options VCR.py provides, please refer to the [VCP.py documentation][vcrpy-doc]. To configure VCR.py within snowflake-vcrpy, please refer to section [Optional vcrpy configuration](#optional-vcrpy-configuration).
+
+# pytest options to run tests in record-and-replay mode
 
 
 ### Specifying tests
@@ -61,13 +70,13 @@ A pytest option is provided to select the tests run in record and replay mode: `
 
 ```bash
 # run tests which are annotated with `@pytest.mark.snowflake_vcr` in record and replay, this is the default mode
-$pytest <tests>
+$ pytest <tests>
 # run tests which are annotated with `@pytest.mark.snowflake_vcr` in record and replay, with explicitly setting the default mode
-$pytest <tests> --snowflake-record-tests-selection annotated
+$ pytest <tests> --snowflake-record-tests-selection annotated
 # disable running record and replay mode for all the tests
-$pytest <tests> --snowflake-record-tests-selection disable
+$ pytest <tests> --snowflake-record-tests-selection disable
 # run all the tests in record and replay regardless of whether the tests are being annotated with `@pytest.mark.snowflake_vcr`
-$pytest <tests> --snowflake-record-tests-selection all
+$ pytest <tests> --snowflake-record-tests-selection all
 ```
 
 
@@ -98,3 +107,8 @@ def snowflake_vcr_config():
         # your vcr config dict
     }
 ```
+
+
+<!-- LINKS -->
+[vcrpy]: https://github.com/kevin1024/vcrpy
+[vcrpy-doc]: https://vcrpy.readthedocs.io/en/latest/index.html

@@ -140,6 +140,6 @@ def snowflake_vcr_cassette_dir(request):
 def snowflake_vcr_config():
     """
     This is the default empty config.
-    Users' definition of sno®wflake_vcr_config fixture will override the empty config.
+    Users' definition of snowflake_vcr_config fixture will override the empty config.
     """
     return {}
