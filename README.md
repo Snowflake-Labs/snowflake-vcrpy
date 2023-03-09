@@ -27,6 +27,7 @@ $ pip install .
 
 ```python
 # Annotate the test to run in record-and-replay mode
+import pytest
 import snowflake.connector
 @pytest.mark.snowflake_vcr
 def test_method():
