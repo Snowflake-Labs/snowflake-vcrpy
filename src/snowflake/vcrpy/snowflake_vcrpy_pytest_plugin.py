@@ -1,6 +1,6 @@
 import pytest
 import os
-
+import urllib.parse
 from ._vendored.vcrpy import VCR
 from ._constant import (
     SnowflakeRecordMode,
@@ -28,12 +28,21 @@ def _process_request_recording(request):
                 key in SNOWFLAKE_REQUEST_ID_STRINGS
                 or key in SNOWFLAKE_DB_RELATED_FIELDS_IN_QUERY
             ):
-                request.uri = request.uri.replace(value, VOID_STRING)
+                if request.uri.find(value) ==-1:
+                    request.uri = request.uri.replace(urllib.parse.quote_plus(value), VOID_STRING)
+                else:
+                    request.uri = request.uri.replace(value, VOID_STRING)
 
         # scrub snowflake account information
         if request.host.endswith(".snowflakecomputing.com"):
             account = request.host.split(".snowflakecomputing.com")[0]
             request.uri = request.uri.replace(account, VOID_STRING)
+
+        if request.host.endswith(".amazonaws.com"):
+            account = request.host.split(".amazonaws.com")[0]
+            code = request.uri.split("/results/")[1].split("/")[0]
+            request.uri = request.uri.replace(account, VOID_STRING)
+            request.uri = request.uri.replace(code, VOID_STRING)
 
     # The following line is to note how to decompress body in request
     # dict_body = json.loads(gzip.decompress(request.body).decode('UTF-8'))
