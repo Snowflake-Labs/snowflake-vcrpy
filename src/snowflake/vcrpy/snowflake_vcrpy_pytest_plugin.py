@@ -35,10 +35,14 @@ def _process_request_recording(request):
             request.uri = request.uri.replace(account, VOID_STRING)
 
         if request.host.endswith(".amazonaws.com"):
+            # extract account information from amazon aws request
             account = request.host.split(".amazonaws.com")[0]
+            # extract result id from amazon aws request
             code = request.uri.split("/results/")[1].split("/")[0]
             request.uri = request.uri.replace(account, VOID_STRING)
             request.uri = request.uri.replace(code, VOID_STRING)
+
+        # TODO: add filter for gcp and azure cloud service in future work, JIRA ticket:SNOW-954706
 
     # The following line is to note how to decompress body in request
     # dict_body = json.loads(gzip.decompress(request.body).decode('UTF-8'))
