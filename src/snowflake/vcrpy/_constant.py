@@ -4,6 +4,13 @@ import uuid
 
 SNOWFLAKE_CREDENTIAL_HEADER_FIELDS = [
     "Authorization",
+    "x-amz-server-side-encryption-customer-key-MD5",
+    "x-amz-server-side-encryption-customer-key-md5",
+    "x-amz-server-side-encryption-customer-key",
+    "x-amz-server-side-encryption-customer-algorithm",
+    "x-amz-id-2",
+    "x-amz-request-id",
+    "x-amz-version-id"
 ]
 
 
@@ -11,6 +18,11 @@ SNOWFLAKE_REQUEST_ID_STRINGS = [
     "request_guid",
     "request_id",
     "requestId",
+    "Signature",
+    "Expires",
+    "AWSAccessKeyId",
+    "x-amz-server-side-encryption-customer-algorithm",
+
 ]
 
 SNOWFLAKE_DB_RELATED_FIELDS_IN_QUERY = [
