@@ -56,7 +56,8 @@ def _process_response_recording(response):
     # The following line is to note how to decompress body in request
     # dict_body =\
     #  json.loads(gzip.decompress(response["body"]["string"]).decode('UTF-8'))
-
+    for key in SNOWFLAKE_CREDENTIAL_HEADER_FIELDS:
+        response["headers"].pop(key, None)
     return response
 
 
