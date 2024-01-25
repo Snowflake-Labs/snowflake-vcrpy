@@ -70,7 +70,7 @@ def _snowflake_vcr_marker(request):
     if snowflake_record_mode == SnowflakeRecordMode.ALL or (
         snowflake_record_mode == SnowflakeRecordMode.ANNOTATED and marker
     ):
-        request.getfixturevalue("vcr_cassette")
+        request.getfixturevalue("snowflake_vcr_cassette")
     else:
         return
 
@@ -116,7 +116,7 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture
-def vcr_cassette(request, snowflake_vcr, snowflake_vcr_cassette_name):
+def snowflake_vcr_cassette(request, snowflake_vcr, snowflake_vcr_cassette_name):
     kwargs = {}
     _update_kwargs(request, kwargs)
     with snowflake_vcr.use_cassette(snowflake_vcr_cassette_name, **kwargs) as cassette:
