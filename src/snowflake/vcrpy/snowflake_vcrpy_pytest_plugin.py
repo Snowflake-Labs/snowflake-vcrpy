@@ -61,6 +61,12 @@ def _process_response_recording(response):
     return response
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "snowflake_vcr: Mark the test as using Snowflake VCR."
+    )
+
+
 @pytest.fixture(autouse=True)
 def _snowflake_vcr_marker(request):
     snowflake_record_mode = request.config.getoption(
@@ -70,7 +76,7 @@ def _snowflake_vcr_marker(request):
     if snowflake_record_mode == SnowflakeRecordMode.ALL or (
         snowflake_record_mode == SnowflakeRecordMode.ANNOTATED and marker
     ):
-        request.getfixturevalue("vcr_cassette")
+        request.getfixturevalue("snowflake_vcr_cassette")
     else:
         return
 
@@ -116,7 +122,7 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture
-def vcr_cassette(request, snowflake_vcr, snowflake_vcr_cassette_name):
+def snowflake_vcr_cassette(request, snowflake_vcr, snowflake_vcr_cassette_name):
     kwargs = {}
     _update_kwargs(request, kwargs)
     with snowflake_vcr.use_cassette(snowflake_vcr_cassette_name, **kwargs) as cassette:
