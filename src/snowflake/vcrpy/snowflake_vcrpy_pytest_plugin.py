@@ -61,6 +61,12 @@ def _process_response_recording(response):
     return response
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "snowflake_vcr: Mark the test as using Snowflake VCR."
+    )
+
+
 @pytest.fixture(autouse=True)
 def _snowflake_vcr_marker(request):
     snowflake_record_mode = request.config.getoption(
