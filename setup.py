@@ -7,7 +7,7 @@ def get_snowflake_vcrpy_packages():
 
 setup(
     name="snowflake-vcrpy",
-    version="0.1.0",
+    version="0.1.2",
     license="Apache License, Version 2.0",
     description="Snowflake version of VCR.py to record and replay tests based on snowflake-connector-python",
     packages=get_snowflake_vcrpy_packages(),
@@ -21,6 +21,7 @@ setup(
         "six>=1.5",
         "yarl",
         "pytest",
+        "urllib3<2",  # mparent(2025-05-22): 2+ breaks this library.
     ],
     extras_require={
         "development": ["snowflake-connector-python[pandas]"],

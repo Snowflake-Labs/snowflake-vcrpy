@@ -1,4 +1,6 @@
 import pytest
+import json
+import gzip
 import os
 import urllib.parse
 from ._vendored.vcrpy import VCR
@@ -47,6 +49,24 @@ def _process_request_recording(request):
     # The following line is to note how to decompress body in request
     # dict_body = json.loads(gzip.decompress(request.body).decode('UTF-8'))
 
+    # Strip sensitive PASSWORD from recorded request.
+    # There is a bug in core VCRPY that prevents stripping post body keys when the request body is compressed.
+    # SEE: https://github.com/kevin1024/vcrpy/issues/660
+    if request.path == '/session/v1/login-request':
+        request_json = json.loads(gzip.decompress(request.body).decode('UTF-8'))
+        if request_body_data := request_json.get('data'):
+            if 'PASSWORD' in request_body_data:
+                # Delete sensitive secret
+                del request_json['data']['PASSWORD']
+
+                # Re-compress body
+                request.body = gzip.compress(json.dumps(request_json).encode('UTF-8'))
+
+                # Update length header
+                del request.headers['Content-Length']
+                request.headers['Content-Length'] = len(request.body)
+
+
     return request
 
 
@@ -61,6 +81,12 @@ def _process_response_recording(response):
     return response
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "snowflake_vcr: Mark the test as using Snowflake VCR."
+    )
+
+
 @pytest.fixture(autouse=True)
 def _snowflake_vcr_marker(request):
     snowflake_record_mode = request.config.getoption(
@@ -70,7 +96,7 @@ def _snowflake_vcr_marker(request):
     if snowflake_record_mode == SnowflakeRecordMode.ALL or (
         snowflake_record_mode == SnowflakeRecordMode.ANNOTATED and marker
     ):
-        request.getfixturevalue("vcr_cassette")
+        request.getfixturevalue("snowflake_vcr_cassette")
     else:
         return
 
@@ -116,7 +142,7 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture
-def vcr_cassette(request, snowflake_vcr, snowflake_vcr_cassette_name):
+def snowflake_vcr_cassette(request, snowflake_vcr, snowflake_vcr_cassette_name):
     kwargs = {}
     _update_kwargs(request, kwargs)
     with snowflake_vcr.use_cassette(snowflake_vcr_cassette_name, **kwargs) as cassette:
