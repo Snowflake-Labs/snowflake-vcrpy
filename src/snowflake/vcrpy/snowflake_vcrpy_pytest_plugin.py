@@ -16,6 +16,13 @@ from ._constant import (
 _SCRUB_SNOWFLAKE_INFO = True
 
 
+def pytest_configure(config):
+    """Register the snowflake_vcr marker"""
+    config.addinivalue_line(
+        "markers", "snowflake_vcr: mark test to run with snowflake VCR recording"
+    )
+
+
 def _process_request_recording(request):
     """Process request before recording
 
