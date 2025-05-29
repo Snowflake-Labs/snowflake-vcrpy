@@ -47,8 +47,9 @@ def parse_headers(header_list):
 
 
 def serialize_headers(response):
+    headers = response.headers if response.msg is None else response.msg
     out = {}
-    for key, values in compat.get_headers(response.msg):
+    for key, values in compat.get_headers(headers):
         out.setdefault(key, [])
         out[key].extend(values)
     return out
@@ -65,8 +66,10 @@ class VCRHTTPResponse(HTTPResponse):
         self.reason = recorded_response["status"]["message"]
         self.status = self.code = recorded_response["status"]["code"]
         self.version = None
+        self.version_string = None
         self._content = BytesIO(self.recorded_response["body"]["string"])
         self._closed = False
+        self._original_response = self  # for requests.session.Session cookie extraction
 
         headers = self.recorded_response["headers"]
         # Since we are loading a response that has already been serialized, our
@@ -90,6 +93,9 @@ class VCRHTTPResponse(HTTPResponse):
 
     def read(self, *args, **kwargs):
         return self._content.read(*args, **kwargs)
+
+    def read1(self, *args, **kwargs):
+        return self._content.read1(*args, **kwargs)
 
     def readall(self):
         return self._content.readall()
@@ -143,6 +149,35 @@ class VCRHTTPResponse(HTTPResponse):
     def readable(self):
         return self._content.readable()
 
+    @property
+    def length_remaining(self):
+        return self._content.getbuffer().nbytes - self._content.tell()
+
+    def get_redirect_location(self):
+        """
+        Returns (a) redirect location string if we got a redirect
+        status code and valid location, (b) None if redirect status and
+        no location, (c) False if not a redirect status code.
+        See https://urllib3.readthedocs.io/en/stable/reference/urllib3.response.html .
+        """
+        if not (300 <= self.status <= 399):
+            return False
+        return self.getheader("Location")
+
+    @property
+    def data(self):
+        return self._content.getbuffer().tobytes()
+
+    def drain_conn(self):
+        pass
+
+    def stream(self, amt=65536, decode_content=None):
+        while True:
+            b = self._content.read(amt)
+            yield b
+            if not b:
+                break
+
 
 class VCRConnection:
     # A reference to the cassette that's currently being patched in
@@ -152,28 +187,40 @@ class VCRConnection:
         """
         Returns empty string for the default port and ':port' otherwise
         """
-        port = self.real_connection.port
+        port = (
+            self.real_connection.port
+            if not self.real_connection._tunnel_host
+            else self.real_connection._tunnel_port
+        )
         default_port = {"https": 443, "http": 80}[self._protocol]
-        return ":{}".format(port) if port != default_port else ""
+        return f":{port}" if port != default_port else ""
+
+    def _real_host(self):
+        """Returns the request host"""
+        if self.real_connection._tunnel_host:
+            # The real connection is to an HTTPS proxy
+            return self.real_connection._tunnel_host
+        else:
+            return self.real_connection.host
 
     def _uri(self, url):
         """Returns request absolute URI"""
         if url and not url.startswith("/"):
             # Then this must be a proxy request.
             return url
-        uri = "{}://{}{}{}".format(self._protocol, self.real_connection.host, self._port_postfix(), url)
+        uri = f"{self._protocol}://{self._real_host()}{self._port_postfix()}{url}"
         log.debug("Absolute URI: %s", uri)
         return uri
 
     def _url(self, uri):
         """Returns request selector url from absolute URI"""
-        prefix = "{}://{}{}".format(self._protocol, self.real_connection.host, self._port_postfix())
+        prefix = f"{self._protocol}://{self._real_host()}{self._port_postfix()}"
         return uri.replace(prefix, "", 1)
 
     def request(self, method, url, body=None, headers=None, *args, **kwargs):
         """Persist the request metadata in self._vcr_request"""
         self._vcr_request = Request(method=method, uri=self._uri(url), body=body, headers=headers or {})
-        log.debug("Got {}".format(self._vcr_request))
+        log.debug(f"Got {self._vcr_request}")
 
         # Note: The request may not actually be finished at this point, so
         # I'm not sending the actual request until getresponse().  This
@@ -189,7 +236,7 @@ class VCRConnection:
         of putheader() calls.
         """
         self._vcr_request = Request(method=method, uri=self._uri(url), body="", headers={})
-        log.debug("Got {}".format(self._vcr_request))
+        log.debug(f"Got {self._vcr_request}")
 
     def putheader(self, header, *values):
         self._vcr_request.headers[header] = values
@@ -221,22 +268,23 @@ class VCRConnection:
         # Check to see if the cassette has a response for this request. If so,
         # then return it
         if self.cassette.can_play_response_for(self._vcr_request):
-            log.info("Playing response for {} from cassette".format(self._vcr_request))
+            log.info(f"Playing response for {self._vcr_request} from cassette")
             response = self.cassette.play_response(self._vcr_request)
             return VCRHTTPResponse(response)
         else:
             if self.cassette.write_protected and self.cassette.filter_request(self._vcr_request):
                 raise CannotOverwriteExistingCassetteException(
-                    cassette=self.cassette, failed_request=self._vcr_request
+                    cassette=self.cassette,
+                    failed_request=self._vcr_request,
                 )
 
             # Otherwise, we should send the request, then get the response
             # and return it.
 
-            log.info("{} not in cassette, sending to real server".format(self._vcr_request))
+            log.info(f"{self._vcr_request} not in cassette, sending to real server")
             # This is imported here to avoid circular import.
             # TODO(@IvanMalison): Refactor to allow normal import.
-            from ..patch import force_reset
+            from snowflake.vcrpy._vendored.vcrpy.patch import force_reset
 
             with force_reset():
                 self.real_connection.request(
@@ -248,12 +296,13 @@ class VCRConnection:
 
             # get the response
             response = self.real_connection.getresponse()
+            response_data = response.data if hasattr(response, "data") else response.read()
 
             # put the response into the cassette
             response = {
                 "status": {"code": response.status, "message": response.reason},
                 "headers": serialize_headers(response),
-                "body": {"string": response.read()},
+                "body": {"string": response_data},
             }
             self.cassette.append(self._vcr_request, response)
         return VCRHTTPResponse(response)
@@ -278,7 +327,7 @@ class VCRConnection:
             # Cassette is write-protected, don't actually connect
             return
 
-        from ..patch import force_reset
+        from snowflake.vcrpy._vendored.vcrpy.patch import force_reset
 
         with force_reset():
             return self.real_connection.connect(*args, **kwargs)
@@ -302,7 +351,7 @@ class VCRConnection:
         # need to temporarily reset here because the real connection
         # inherits from the thing that we are mocking out.  Take out
         # the reset if you want to see what I mean :)
-        from ..patch import force_reset
+        from snowflake.vcrpy._vendored.vcrpy.patch import force_reset
 
         with force_reset():
             self.real_connection = self._baseclass(*args, **kwargs)
@@ -353,6 +402,8 @@ class VCRHTTPConnection(VCRConnection):
 
     _baseclass = HTTPConnection
     _protocol = "http"
+    debuglevel = _baseclass.debuglevel
+    _http_vsn = _baseclass._http_vsn
 
 
 class VCRHTTPSConnection(VCRConnection):
@@ -361,3 +412,5 @@ class VCRHTTPSConnection(VCRConnection):
     _baseclass = HTTPSConnection
     _protocol = "https"
     is_verified = True
+    debuglevel = _baseclass.debuglevel
+    _http_vsn = _baseclass._http_vsn

@@ -3,7 +3,7 @@ import warnings
 from io import BytesIO
 from urllib.parse import parse_qsl, urlparse
 
-from .util import CaseInsensitiveDict
+from .util import CaseInsensitiveDict, _is_nonsequence_iterator
 
 log = logging.getLogger(__name__)
 
@@ -17,12 +17,24 @@ class Request:
         self.method = method
         self.uri = uri
         self._was_file = hasattr(body, "read")
+        self._was_iter = _is_nonsequence_iterator(body)
         if self._was_file:
             self.body = body.read()
+        elif self._was_iter:
+            self.body = list(body)
         else:
             self.body = body
         self.headers = headers
         log.debug("Invoking Request %s", self.uri)
+
+    @property
+    def uri(self):
+        return self._uri
+
+    @uri.setter
+    def uri(self, uri):
+        self._uri = uri
+        self.parsed_uri = urlparse(uri)
 
     @property
     def headers(self):
@@ -36,7 +48,11 @@ class Request:
 
     @property
     def body(self):
-        return BytesIO(self._body) if self._was_file else self._body
+        if self._was_file:
+            return BytesIO(self._body)
+        if self._was_iter:
+            return iter(self._body)
+        return self._body
 
     @body.setter
     def body(self, value):
@@ -46,37 +62,37 @@ class Request:
 
     def add_header(self, key, value):
         warnings.warn(
-            "Request.add_header is deprecated. " "Please assign to request.headers instead.",
+            "Request.add_header is deprecated. Please assign to request.headers instead.",
             DeprecationWarning,
+            stacklevel=2,
         )
         self.headers[key] = value
 
     @property
     def scheme(self):
-        return urlparse(self.uri).scheme
+        return self.parsed_uri.scheme
 
     @property
     def host(self):
-        return urlparse(self.uri).hostname
+        return self.parsed_uri.hostname
 
     @property
     def port(self):
-        parse_uri = urlparse(self.uri)
-        port = parse_uri.port
+        port = self.parsed_uri.port
         if port is None:
             try:
-                port = {"https": 443, "http": 80}[parse_uri.scheme]
+                port = {"https": 443, "http": 80}[self.parsed_uri.scheme]
             except KeyError:
                 pass
         return port
 
     @property
     def path(self):
-        return urlparse(self.uri).path
+        return self.parsed_uri.path
 
     @property
     def query(self):
-        q = urlparse(self.uri).query
+        q = self.parsed_uri.query
         return sorted(parse_qsl(q))
 
     # alias for backwards compatibility
@@ -90,7 +106,7 @@ class Request:
         return self.scheme
 
     def __str__(self):
-        return "<Request ({}) {}>".format(self.method, self.uri)
+        return f"<Request ({self.method}) {self.uri}>"
 
     def __repr__(self):
         return self.__str__()

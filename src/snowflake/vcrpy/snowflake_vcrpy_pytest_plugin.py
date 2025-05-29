@@ -16,6 +16,13 @@ from ._constant import (
 _SCRUB_SNOWFLAKE_INFO = True
 
 
+def pytest_configure(config):
+    """Register the snowflake_vcr marker"""
+    config.addinivalue_line(
+        "markers", "snowflake_vcr: mark test to run with snowflake VCR recording"
+    )
+
+
 def _process_request_recording(request):
     """Process request before recording
 
@@ -133,6 +140,7 @@ def snowflake_vcr(request, snowflake_vcr_cassette_dir, snowflake_vcr_config):
         filter_headers=SNOWFLAKE_CREDENTIAL_HEADER_FIELDS
         if _SCRUB_SNOWFLAKE_INFO
         else [],
+        decode_compressed_response=True,
         **(snowflake_vcr_config or {})
     )
     _update_kwargs(request, kwargs)

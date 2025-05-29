@@ -1,10 +1,12 @@
 """Stubs for aiohttp HTTP clients"""
+
 import asyncio
 import functools
 import json
 import logging
+from collections.abc import Mapping
 from http.cookies import CookieError, Morsel, SimpleCookie
-from typing import Mapping, Union
+from typing import Union
 
 from aiohttp import ClientConnectionError, ClientResponse, CookieJar, RequestInfo, hdrs, streams
 from aiohttp.helpers import strip_auth_from_url
@@ -35,7 +37,7 @@ class MockClientResponse(ClientResponse):
             session=None,
         )
 
-    async def json(self, *, encoding="utf-8", loads=json.loads, **kwargs):  # NOQA: E999
+    async def json(self, *, encoding="utf-8", loads=json.loads, **kwargs):
         stripped = self._body.strip()
         if not stripped:
             return None
@@ -66,7 +68,7 @@ def build_response(vcr_request, vcr_response, history):
         headers=_deserialize_headers(vcr_request.headers),
         real_url=URL(vcr_request.url),
     )
-    response = MockClientResponse(vcr_request.method, URL(vcr_response.get("url")), request_info=request_info)
+    response = MockClientResponse(vcr_request.method, URL(vcr_request.url), request_info=request_info)
     response.status = vcr_response["status"]["code"]
     response._body = vcr_response["body"].get("string", b"")
     response.reason = vcr_response["status"]["message"]
@@ -162,8 +164,7 @@ async def record_response(cassette, vcr_request, response):
     vcr_response = {
         "status": {"code": response.status, "message": response.reason},
         "headers": _serialize_headers(response.headers),
-        "body": body,  # NOQA: E999
-        "url": str(response.url),
+        "body": body,
     }
 
     cassette.append(vcr_request, vcr_response)
@@ -261,7 +262,7 @@ def vcr_request(cassette, real_request):
         vcr_request = Request(method, str(request_url), data, _serialize_headers(headers))
 
         if cassette.can_play_response_for(vcr_request):
-            log.info("Playing response for {} from cassette".format(vcr_request))
+            log.info(f"Playing response for {vcr_request} from cassette")
             response = play_responses(cassette, vcr_request, kwargs)
             for redirect in response.history:
                 self._cookie_jar.update_cookies(redirect.cookies, redirect.url)
@@ -273,7 +274,7 @@ def vcr_request(cassette, real_request):
 
         log.info("%s not in cassette, sending to real server", vcr_request)
 
-        response = await real_request(self, method, url, **kwargs)  # NOQA: E999
+        response = await real_request(self, method, url, **kwargs)
         await record_responses(cassette, vcr_request, response)
         return response
 
