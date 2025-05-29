@@ -1,9 +1,5 @@
 import types
-
-try:
-    from collections.abc import Mapping, MutableMapping
-except ImportError:
-    from collections import Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping
 
 
 # Shamelessly stolen from https://github.com/kennethreitz/requests/blob/master/requests/structures.py
@@ -31,7 +27,7 @@ class CaseInsensitiveDict(MutableMapping):
     """
 
     def __init__(self, data=None, **kwargs):
-        self._store = dict()
+        self._store = {}
         if data is None:
             data = {}
         self.update(data, **kwargs)
@@ -93,9 +89,28 @@ def compose(*functions):
     return composed
 
 
+def _is_nonsequence_iterator(obj):
+    return hasattr(obj, "__iter__") and not isinstance(
+        obj,
+        (bytearray, bytes, dict, list, str),
+    )
+
+
 def read_body(request):
     if hasattr(request.body, "read"):
         return request.body.read()
+    if _is_nonsequence_iterator(request.body):
+        body = list(request.body)
+        if body:
+            if isinstance(body[0], str):
+                return "".join(body).encode("utf-8")
+            elif isinstance(body[0], (bytes, bytearray)):
+                return b"".join(body)
+            elif isinstance(body[0], int):
+                return bytes(body)
+            else:
+                raise ValueError(f"Body type {type(body[0])} not supported")
+        return b""
     return request.body
 
 

@@ -1,7 +1,7 @@
 import yaml
 
-from .request import Request
-from .serializers import compat
+from snowflake.vcrpy._vendored.vcrpy.request import Request
+from snowflake.vcrpy._vendored.vcrpy.serializers import compat
 
 # version 1 cassettes started with VCR 1.0.x.
 # Before 1.0.x, there was no versioning.
@@ -28,7 +28,7 @@ def _warn_about_old_cassette_format():
     raise ValueError(
         "Your cassette files were generated in an older version "
         "of VCR. Delete your cassettes or run the migration script."
-        "See http://git.io/mHhLBg for more details."
+        "See http://git.io/mHhLBg for more details.",
     )
 
 

@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import inspect
 import logging
@@ -5,8 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from ..errors import CannotOverwriteExistingCassetteException
-from ..request import Request as VcrRequest
+from vcr.errors import CannotOverwriteExistingCassetteException
+from vcr.filters import decode_response
+from vcr.request import Request as VcrRequest
+from vcr.serializers.compat import convert_body_to_bytes
 
 _httpx_signature = inspect.signature(httpx.Client.request)
 
@@ -33,13 +36,28 @@ def _transform_headers(httpx_response):
     return out
 
 
-def _to_serialized_response(httpx_response):
-    return {
-        "status_code": httpx_response.status_code,
-        "http_version": httpx_response.http_version,
-        "headers": _transform_headers(httpx_response),
-        "content": httpx_response.content.decode("utf-8", "ignore"),
+async def _to_serialized_response(resp, aread):
+    # The content shouldn't already have been read in by HTTPX.
+    assert not hasattr(resp, "_decoder")
+
+    # Retrieve the content, but without decoding it.
+    with patch.dict(resp.headers, {"Content-Encoding": ""}):
+        if aread:
+            await resp.aread()
+        else:
+            resp.read()
+
+    result = {
+        "status": {"code": resp.status_code, "message": resp.reason_phrase},
+        "headers": _transform_headers(resp),
+        "body": {"string": resp.content},
     }
+
+    # As the content wasn't decoded, we restore the response to a state which
+    # will be capable of decoding the content for the consumer.
+    del resp._decoder
+    resp._content = resp._get_content_decoder().decode(resp.content)
+    return result
 
 
 def _from_serialized_headers(headers):
@@ -57,15 +75,32 @@ def _from_serialized_headers(headers):
 @patch("httpx.Response.close", MagicMock())
 @patch("httpx.Response.read", MagicMock())
 def _from_serialized_response(request, serialized_response, history=None):
-    content = serialized_response.get("content").encode()
+    # Cassette format generated for HTTPX requests by older versions of
+    # vcrpy. We restructure the content to resemble what a regular
+    # cassette looks like.
+    if "status_code" in serialized_response:
+        serialized_response = decode_response(
+            convert_body_to_bytes(
+                {
+                    "headers": serialized_response["headers"],
+                    "body": {"string": serialized_response["content"]},
+                    "status": {"code": serialized_response["status_code"]},
+                },
+            ),
+        )
+        extensions = None
+    else:
+        extensions = {"reason_phrase": serialized_response["status"]["message"].encode()}
+
     response = httpx.Response(
-        status_code=serialized_response.get("status_code"),
+        status_code=serialized_response["status"]["code"],
         request=request,
-        headers=_from_serialized_headers(serialized_response.get("headers")),
-        content=content,
+        headers=_from_serialized_headers(serialized_response["headers"]),
+        content=serialized_response["body"]["string"],
         history=history or [],
+        extensions=extensions,
     )
-    response._content = content
+
     return response
 
 
@@ -91,45 +126,23 @@ def _shared_vcr_send(cassette, real_send, *args, **kwargs):
     return vcr_request, None
 
 
-def _record_responses(cassette, vcr_request, real_response):
+async def _record_responses(cassette, vcr_request, real_response, aread):
     for past_real_response in real_response.history:
         past_vcr_request = _make_vcr_request(past_real_response.request)
-        cassette.append(past_vcr_request, _to_serialized_response(past_real_response))
+        cassette.append(past_vcr_request, await _to_serialized_response(past_real_response, aread))
 
     if real_response.history:
         # If there was a redirection keep we want the request which will hold the
         # final redirect value
         vcr_request = _make_vcr_request(real_response.request)
 
-    cassette.append(vcr_request, _to_serialized_response(real_response))
+    cassette.append(vcr_request, await _to_serialized_response(real_response, aread))
     return real_response
 
 
 def _play_responses(cassette, request, vcr_request, client, kwargs):
-    history = []
-
-    allow_redirects = kwargs.get(
-        HTTPX_REDIRECT_PARAM.name,
-        HTTPX_REDIRECT_PARAM.default,
-    )
     vcr_response = cassette.play_response(vcr_request)
     response = _from_serialized_response(request, vcr_response)
-
-    while allow_redirects and 300 <= response.status_code <= 399:
-        next_url = response.headers.get("location")
-        if not next_url:
-            break
-
-        vcr_request = VcrRequest("GET", next_url, None, dict(response.headers))
-        vcr_request = cassette.find_requests_with_most_matches(vcr_request)[0][0]
-
-        history.append(response)
-        # add cookies from response to session cookie store
-        client.cookies.extract_cookies(response)
-
-        vcr_response = cassette.play_response(vcr_request)
-        response = _from_serialized_response(vcr_request, vcr_response, history)
-
     return response
 
 
@@ -141,7 +154,8 @@ async def _async_vcr_send(cassette, real_send, *args, **kwargs):
         return response
 
     real_response = await real_send(*args, **kwargs)
-    return _record_responses(cassette, vcr_request, real_response)
+    await _record_responses(cassette, vcr_request, real_response, aread=True)
+    return real_response
 
 
 def async_vcr_send(cassette, real_send):
@@ -152,6 +166,22 @@ def async_vcr_send(cassette, real_send):
     return _inner_send
 
 
+def _run_async_function(sync_func, *args, **kwargs):
+    """
+    Safely run an asynchronous function from a synchronous context.
+    Handles both cases:
+    - An event loop is already running.
+    - No event loop exists yet.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(sync_func(*args, **kwargs))
+    else:
+        # If inside a running loop, create a task and wait for it
+        return asyncio.ensure_future(sync_func(*args, **kwargs))
+
+
 def _sync_vcr_send(cassette, real_send, *args, **kwargs):
     vcr_request, response = _shared_vcr_send(cassette, real_send, *args, **kwargs)
     if response:
@@ -160,7 +190,8 @@ def _sync_vcr_send(cassette, real_send, *args, **kwargs):
         return response
 
     real_response = real_send(*args, **kwargs)
-    return _record_responses(cassette, vcr_request, real_response)
+    _run_async_function(_record_responses, cassette, vcr_request, real_response, aread=False)
+    return real_response
 
 
 def sync_vcr_send(cassette, real_send):
